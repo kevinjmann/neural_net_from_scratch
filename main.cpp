@@ -62,8 +62,8 @@ class Matrix {
          */
         nCol = vec1.size();
         nRow = vec2.size();
-        for (int i = 0; i < nCol; i++) {
-            for (int j = 0; j < nRow; j++) {
+        for (int i = 0; i < nRow; i++) {
+            for (int j = 0; j < nCol; j++) {
                 weights.push_back(vec1[i] * vec2[j]);
             }
         }
@@ -164,11 +164,14 @@ class Layer {
     public:
     Matrix weights;
     Matrix deltaWeights;
-    std::vector<float> deltaBiases;
     Matrix previousOutput;
+    activationFunction activationFunctionId;
+
+    // values used in backpropagation
     std::vector<float> avgUnactivatedOutput;
     std::vector<float> avgActivatedOutput;
-    activationFunction activationFunctionId;
+    std::vector<float> nodeLocalGradients; // Note, also serves as a delta value for biases.
+
     Layer(int numFeatures, int numNeurons) {
         std::vector<float> initialWeights;
         for(int i = 0; i < numFeatures * numNeurons; i++) {
@@ -237,6 +240,7 @@ class Layer {
 
             default: break;
         }
+        void updateWeights();
     }
     
     Matrix forward(Matrix &input) {
@@ -247,17 +251,15 @@ class Layer {
             }
             // FIXME add in summation to accumulator variables to take average after this loop.
             activateRow(&(previousOutput.weights[i*weights.nCol]), weights.nCol);
-            // for(int j = 0; j < res.nCol; j++) {
-            //     float activated = res.getValAt(i,j) + biases[j];
-            //     activated = activation(activated);
-            //     res.setValAt(i, j, activated);
-            // }
 
             
         }
         return previousOutput;
     }
-    
+
+    std::vector<float> backward(Layer& leftLayer);
+    void setLocalGradients(std::vector<float> localGradients);
+    void Layer::updateWeightsAndBiases();
 
     friend std::ostream& operator<<(std::ostream& out, Layer& l);
 };
@@ -273,7 +275,7 @@ class Network {
         }
     }
     void backward(std::vector<int> labels) {
-        std::vector<float> crossEntropyDeltas = delta_cross_entropy(layers[layers.size() - 1].previousOutput, labels);
+        std::vector<float> crossEntropyDeltas = getDeltaCrossEntropy(layers[layers.size() - 1].previousOutput, labels);
         int depth = 0;
         for(int l = layers.size() - 1; l >= 0; l--) {
             
@@ -335,7 +337,7 @@ float accuracy(Matrix output, std::vector<float> labels) {
     }
     return (float) numCorrect/labels.size();
 }
-std::vector<float> delta_cross_entropy(Matrix softmaxOutputs, std::vector<int> labels) {
+std::vector<float> getDeltaCrossEntropy(Matrix softmaxOutputs, std::vector<int> labels) {
     Matrix batchDeltas(softmaxOutputs);
     std::vector<float> result;
     for(int i = 0; i < softmaxOutputs.nCol; i++) {
@@ -397,7 +399,7 @@ int main() {
     network.forward(dataSetMat);
     std::cout << l2out << "\n\n\n" << std::endl;
     std::cout << network.layers[1].previousOutput << "\n\n\n" << std::endl;
-    std::vector<float> dce = delta_cross_entropy(network.layers[1].previousOutput, test.labels);
+    std::vector<float> dce = getDeltaCrossEntropy(network.layers[1].previousOutput, test.labels);
     for(int i = 0; i < dce.size(); i++) {
         std::cout << dce[i] << std::endl;
     }
@@ -426,7 +428,53 @@ void Matrix::transpose() {
     nCol = temp;
 }
 
+std::vector<float> Layer::backward(Layer& leftLayer){
+    /**
+     * @brief Calculate the delta weights. Return local gradient values for next layer
+     * 
+     */
+    Matrix deltaWeightsToSet(leftLayer.avgActivatedOutput, nodeLocalGradients);
+    deltaWeights = deltaWeightsToSet;
+    std::vector<float> localGradientCopy;
+    for(int i= 0; i < nodeLocalGradients.size(); i++) {
+        localGradientCopy.push_back(nodeLocalGradients[i]);
+    }
+    Matrix localGradientMat(nodeLocalGradients.size(), 1, localGradientCopy);
+    Matrix leftLayerLocalGradientsMat = weights * localGradientMat;
+    std::vector<float> activationFunctionComponent;
+    float curValue;
+    switch(leftLayer.activationFunctionId) {
+        case relu:
+            for(int i = 0; i < leftLayer.avgUnactivatedOutput.size(); i++) {
+                curValue = leftLayer.avgUnactivatedOutput[i] > 0 ? 1 : 0;
+                activationFunctionComponent.push_back(curValue);
+            }
+            break;
+        case sigmoid:
+            for(int i = 0; i < leftLayer.avgActivatedOutput.size(); i++) {
+                curValue = leftLayer.avgActivatedOutput[i] * (1 - leftLayer.avgActivatedOutput[i]);
+                activationFunctionComponent.push_back(curValue);
+            } 
+            break;
+    }
+    return pointwiseMult(leftLayerLocalGradientsMat.weights, activationFunctionComponent);
+}
 
+void Layer::updateWeightsAndBiases() {
+    for(int i = 0; i < weights.nRow; i++) {
+        for(int j = 0; j < weights.nCol; j++) {
+            weights.setValAt(i, j, weights.getValAt(i, j) - deltaWeights.getValAt(i, j));
+        }
+    }
+    for(int i = 0; i < biases.size(); i++) {
+        biases[i] -= nodeLocalGradients[i];
+    }
+}
+
+
+void Layer::setLocalGradients(std::vector<float> localGradients) {
+    nodeLocalGradients = localGradients;
+}
 
 std::ostream& operator<<(std::ostream& out, Matrix &m){
     for(int i = 0; i < m.nRow; i++) {
@@ -466,4 +514,16 @@ Matrix operator*(Matrix& A, Matrix& B) {
         }
     }
     return Matrix(A.nRow, B.nCol, values);
+}
+
+std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vecB) {
+    std::vector<float> result;
+    if(vecA.size() != vecB.size()) {
+        std::cout << "pointwise multiplication error. Both vectors must be of equal size." << std::endl;
+        return result;
+    }
+    for(int i = 0; i < vecA.size(); i++) {
+        result.push_back(vecA[i] * vecB[i]);
+    }
+    return result;
 }
