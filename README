@@ -1,1 +1,3 @@
-An attempt at implementing simple dense neural networks and simple matrix calculations in C++ as a first project to get more experience in the language. 
+An attempt at implementing simple dense neural networks and simple matrix calculations in C++ as a first project to get more experience in the language.
+
+Based heavily on Sentdex's neural network from scratch videos for python.
