@@ -129,9 +129,13 @@ class Matrix {
 class DataSet {
     public:
     std::vector<DataPoint> points;
-    std::vector<int> classes;
-    std::vector<int> labels;
+    std::vector<int> classes; // contains all the possible classes.
+    std::vector<int> labels; // contains the classes of all points.
     DataSet(int numPoints, int numC){
+        /**
+         * @brief Creates a 2d swirled data set with numPoints number of points and numC number of classes.
+         * 
+         */
         for(int i = 0; i < numC; i++) {
             classes.push_back(i);
         }
@@ -191,18 +195,22 @@ class Layer {
     Layer(Matrix m, std::vector<float> b, activationFunction fId=step): weights(m), biases(b), activationFunctionId(fId){
 
     }
-    float activation(float& val){
-        float res;
-        switch(activationFunctionId) {
-            case relu: res = val > 0 ? val : 0; break;
-            case step: res = val > 0 ? 1: 0; break;
-            case sigmoid: res = 1/(1 + std::exp(val)); break;
-            default: res = val; break;
-        }
-        return res;
-    }
+    // float activation(float& val){
+    //     float res;
+    //     switch(activationFunctionId) {
+    //         case relu: res = val > 0 ? val : 0; break;
+    //         case step: res = val > 0 ? 1: 0; break;
+    //         case sigmoid: res = 1/(1 + std::exp(val)); break;
+    //         default: res = val; break;
+    //     }
+    //     return res;
+    // }
 
     void activateRow(float* val, int numVals) {
+        /**
+         * @brief Applies an activation function to an output row.
+         * 
+         */
         float totalExp = 0;
         float rowMax =0;
         if(activationFunctionId == softmax){
@@ -244,16 +252,27 @@ class Layer {
     }
     
     Matrix forward(Matrix &input) {
+        /**
+         * @brief Run input through a forward pass of the layer. Keep track of the avg. output for each node for later backpropagation.
+         * 
+         */
         previousOutput = input*weights;
+        std::vector<float> avgOutputAccumulator;
+        float inv_batch_size = 1 / previousOutput.nRow;
+        for(int i= 0; i < previousOutput.nCol; i++) {
+            avgOutputAccumulator.push_back(0);
+        }
         for(int i = 0; i <previousOutput.nRow; i++) {
             for(int j = 0; j < previousOutput.nCol; j++) {
                 previousOutput.setValAt(i,j, previousOutput.getValAt(i, j) + biases[j]);
             }
-            // FIXME add in summation to accumulator variables to take average after this loop.
             activateRow(&(previousOutput.weights[i*weights.nCol]), weights.nCol);
-
+            for(int j = 0; j < weights.nCol; j++) {
+                avgOutputAccumulator[i] += previousOutput.weights[i*weights.nCol + j] * inv_batch_size;
+            }
             
         }
+        avgActivatedOutput = avgOutputAccumulator;
         return previousOutput;
     }
 
@@ -275,6 +294,7 @@ class Network {
         }
     }
     void backward(std::vector<int> labels) {
+        // TODO implement
         std::vector<float> crossEntropyDeltas = getDeltaCrossEntropy(layers[layers.size() - 1].previousOutput, labels);
         int depth = 0;
         for(int l = layers.size() - 1; l >= 0; l--) {
@@ -286,6 +306,10 @@ class Network {
 };
 const float eps = 1e-7;
 float clipVal(float val) {
+    /**
+     * @brief Clips value between 0 and 1 with boundary padding of epsilon.
+     * 
+     */
     if(val <= 0) return eps;
     if(val >=(1-eps)) return 1-eps;
     return val;
@@ -445,8 +469,8 @@ std::vector<float> Layer::backward(Layer& leftLayer){
     float curValue;
     switch(leftLayer.activationFunctionId) {
         case relu:
-            for(int i = 0; i < leftLayer.avgUnactivatedOutput.size(); i++) {
-                curValue = leftLayer.avgUnactivatedOutput[i] > 0 ? 1 : 0;
+            for(int i = 0; i < leftLayer.avgActivatedOutput.size(); i++) {
+                curValue = leftLayer.avgActivatedOutput[i] > 0 ? 1 : 0;
                 activationFunctionComponent.push_back(curValue);
             }
             break;
@@ -517,6 +541,10 @@ Matrix operator*(Matrix& A, Matrix& B) {
 }
 
 std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vecB) {
+    /**
+     * @brief Multiply two vectors pointwise and recieve a new vector of the same size.
+     * 
+     */
     std::vector<float> result;
     if(vecA.size() != vecB.size()) {
         std::cout << "pointwise multiplication error. Both vectors must be of equal size." << std::endl;
