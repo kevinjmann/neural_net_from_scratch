@@ -3,6 +3,8 @@
 #include <vector>
 #include <math.h>
 #include <fstream>
+#include <algorithm>
+#include <random>
 
 enum activationFunction {
     relu,
@@ -14,6 +16,7 @@ enum activationFunction {
 struct DataPoint {
     float x;
     float y;
+    int label;
     friend std::ostream& operator<<(std::ostream& out, DataPoint &dp) {
         out <<dp.x << ", " << dp.y;
         return out; 
@@ -31,8 +34,7 @@ class Vector {
     }
     float dot(Vector a) {
         if(length != a.length) {
-            std::cout << "lengths do not match, dot product could not be calculated" << std::endl;
-            return 0;
+            throw "lengths do not match, dot product could not be calculated";
         }
         float res = 0;
         for(int i = 0; i < length; i++) {
@@ -88,8 +90,7 @@ class Matrix {
     }
     Vector getRow(int i) {
         if(i > nRow || i < 0) {
-            std::cout << "invalid row index" << std::endl;
-            // TODO missing throw exception
+            throw "getRow: invalid row index";
         }
         std::vector<float> resWeights;
         int initialPos = i*nCol;
@@ -103,7 +104,7 @@ class Matrix {
     }
     Vector getCol(int i) {
         if(i > nCol || i < 0) {
-            std::cout << "invalid column id" << std::endl;
+            throw "getCol: invalid colummn id";
         }
         std::vector<float> resWeights;
         int initialPos = i;
@@ -131,6 +132,12 @@ class DataSet {
     std::vector<DataPoint> points;
     std::vector<int> classes; // contains all the possible classes.
     std::vector<int> labels; // contains the classes of all points.
+    Matrix trainData;
+    std::vector<int> trainLabels;
+
+    Matrix testData;
+    std::vector<int> testLabels;
+    float trainTestSplit = 0.9;
     DataSet(int numPoints, int numC){
         /**
          * @brief Creates a 2d swirled data set with numPoints number of points and numC number of classes.
@@ -146,19 +153,65 @@ class DataSet {
                 // std::cout << "r: " << r << std::endl;
                 float t = (float)(((i+1)*4 - (i * 4)) *(i+1)* ix)/numPoints + static_cast <float> (std::rand()) / static_cast <float> (RAND_MAX) * 0.5f;
                 // std:: cout << "t: " << t << std::endl;
-                DataPoint dp({(float) (r*sin(t*2.5)), (float)(r*cos(t*2.5))});
+                DataPoint dp({(float) (r*sin(t*2.5)), (float)(r*cos(t*2.5)), i});
                 points.push_back(dp);
-                labels.push_back(i);
+                // labels.push_back(i);
             }
         }
+
+        initializeTrainTestData();
     }
-    Matrix getMatrix() {
-        std::vector<float> weights;
-        for(int i = 0; i < points.size(); i++) {
-            weights.push_back(points[i].x);
-            weights.push_back(points[i].y);
+
+    void shuffleData (){
+        /**
+         * @brief Shuffle the data points in place
+         * cf https://stackoverflow.com/questions/6926433/how-to-shuffle-a-stdvector
+         */
+        auto rng = std::default_random_engine {};
+        std::shuffle(std::begin(points), std::end(points), rng);
+    }
+    void initializeTrainTestData() {
+        shuffleData();
+        int splitBoundaryIdx = floor(trainTestSplit * points.size());
+        std::vector<DataPoint> trainPoints;
+        for(int i = 0; i < splitBoundaryIdx; i++) {
+            trainPoints.push_back(points[i]);
         }
-        Matrix m(points.size(), 2, weights);
+        trainData = getMatrix(trainPoints);
+        
+        std::vector<int> tmpTrainLabels;
+        for(int i = 0; i < trainPoints.size(); i++) {
+            tmpTrainLabels.push_back(trainPoints[i].label);
+        }
+        trainLabels = tmpTrainLabels;
+
+        std::vector<DataPoint> testPoints;
+        for(int i = splitBoundaryIdx; i < points.size(); i++) {
+            testPoints.push_back(points[i]);
+        }
+        testData = getMatrix(testPoints);
+
+        std::vector<int> tmpTestLabels;
+        for(int i = 0; i < testPoints.size(); i++) {
+            tmpTestLabels.push_back(testPoints[i].label);
+        }
+        testLabels = tmpTestLabels;
+    }
+
+    std::vector<int> getLabels() {
+        std::vector<int> toReturn;
+        for(int i = 0; i < points.size(); i++) {
+            toReturn.push_back(points[i].label);
+        }
+        return toReturn;
+    }
+    Matrix getMatrix(std::vector<DataPoint> pointSubset) {
+        std::vector<float> weights;
+        for(int i = 0; i < pointSubset.size(); i++) {
+            weights.push_back(pointSubset[i].x);
+            weights.push_back(pointSubset[i].y);
+        }
+        Matrix m(pointSubset.size(), 2, weights);
         return m;
     }
 };
@@ -413,15 +466,15 @@ int main() {
     layer1.activationFunctionId = relu;
     Layer layer2(3, 3);
     layer2.activationFunctionId = softmax;
-    Matrix dataSetMat = test.getMatrix();
+    // Matrix dataSetMat = test.getMatrix();
     // std::cout << dataSetMat << std::endl;
-    Matrix l1out = layer1.forward(dataSetMat);
-    Matrix l2out = layer2.forward(l1out);
+    // Matrix l1out = layer1.forward(dataSetMat);
+    // Matrix l2out = layer2.forward(l1out);
     Network network;
     network.layers.push_back(layer1);
     network.layers.push_back(layer2);
-    network.forward(dataSetMat);
-    std::cout << l2out << "\n\n\n" << std::endl;
+    // network.forward(dataSetMat);
+    // std::cout << l2out << "\n\n\n" << std::endl;
     std::cout << network.layers[1].previousOutput << "\n\n\n" << std::endl;
     std::vector<float> dce = getDeltaCrossEntropy(network.layers[1].previousOutput, test.labels);
     for(int i = 0; i < dce.size(); i++) {
@@ -527,7 +580,7 @@ std::ostream& operator<<(std::ostream& out, Layer& l){
 
 Matrix operator*(Matrix& A, Matrix& B) {
     if(A.nCol != B.nRow) {
-        std::cout << "matrices don't have matching dimensions and cannot be multiplied" << std::endl;
+        throw "matrix multiplication error: matrices don't have matching dimensions and cannot be multiplied";
     }
     std::vector<float> values;
     for(int i = 0; i < A.nRow; i++) {
@@ -547,8 +600,7 @@ std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vec
      */
     std::vector<float> result;
     if(vecA.size() != vecB.size()) {
-        std::cout << "pointwise multiplication error. Both vectors must be of equal size." << std::endl;
-        return result;
+        throw "pointwiseMult: pointwise multiplication error. Both vectors must be of equal size.";
     }
     for(int i = 0; i < vecA.size(); i++) {
         result.push_back(vecA[i] * vecB[i]);
