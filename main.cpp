@@ -515,60 +515,17 @@ float accuracy(Matrix output, std::vector<float> labels) {
 }
 
 int main() {
-    // std::vector<float> inputs = {
-    //     1, 2, 3, 2.5,
-    //     2, 5, -1, 2,
-    //     -1.5, 2.7, 3.3, -0.8
-    // };
-    // Matrix input(3, 4, inputs);
-    // std::vector<float> weights {
-    //      0.2,  0.5,   -0.26,
-    //      0.8, -0.91,  -0.27,
-    //     -0.5,  0.26,   0.17,
-    //      1,    -0.5,   0.87
-    // };
-    // Matrix m(4, 3, weights);
-    // std::vector<float> biases{2, 3, 0.5};
-    // Layer firstLayer(m, biases);
-    // std::vector<float>l2weights {
-    //     0.1, -0.5, -0.44,
-    //     -0.14, 0.12, 0.73, 
-    //     0.5, -0.33, -0.13
-    // };
-    // Matrix l2mat(3, 3, l2weights);
-    // std::vector<float> biases2{-1, 2, -0.5};
-    // Layer secondLayer(l2mat, biases2);
-    // Layer randomLayer(5,3);
-    // Matrix secondOutput = secondLayer.forward(firstLayer.forward(input));
-    // std::cout << "2nd layer output\n" << secondOutput << std::endl;
-    // std::cout << "random layer:\n" << randomLayer << std::endl;
-    DataSet test(100, 3);
-    Layer layer1(2, 3);
-    layer1.activationFunctionId = relu;
-    Layer layer2(3, 3);
+    DataSet test(10000, 3);
+    Layer layer1(2, 5);
+    layer1.activationFunctionId = sigmoid;
+    Layer layer2(5, 3);
     layer2.activationFunctionId = softmax;
-    // Matrix dataSetMat = test.getMatrix();
-    // std::cout << dataSetMat << std::endl;
-    // Matrix l1out = layer1.forward(dataSetMat);
-    // Matrix l2out = layer2.forward(l1out);
+
     Network network;
     network.layers.push_back(layer1);
     network.layers.push_back(layer2);
     Trainer trainer(network, test);
-    trainer.train(10);
-
-    // network.forward(dataSetMat);
-    // std::cout << l2out << "\n\n\n" << std::endl;
-    // std::cout << network.layers[1].previousOutput << "\n\n\n" << std::endl;
-    // std::vector<float> dce = getDeltaCrossEntropy(network.layers[1].previousOutput, test.labels);
-    // for(int i = 0; i < dce.size(); i++) {
-    //     std::cout << dce[i] << std::endl;
-    // }
-    // Matrix sampleMatrix(1, 3, {0.7, 0.1, 0.2});
-    // std::vector<float> sampleLabels{0};
-    // std::cout << "mean loss: "<< meanLoss(getBatchLoss(sampleMatrix, sampleLabels)) << std::endl;
-    // // std::cout << l2out << std::endl;
-
+    trainer.train(64);
 
 
     return 0;
@@ -624,7 +581,7 @@ std::vector<float> Layer::backward(Layer& leftLayer){
 void Layer::updateWeightsAndBiases() {
     for(int i = 0; i < weights.nRow; i++) {
         for(int j = 0; j < weights.nCol; j++) {
-            weights.setValAt(i, j, weights.getValAt(i, j) - deltaWeights.getValAt(i, j));
+            weights.setValAt(i, j, weights.getValAt(i, j) + 0.01 * deltaWeights.getValAt(i, j));
         }
     }
     for(int i = 0; i < biases.size(); i++) {
