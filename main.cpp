@@ -6,6 +6,23 @@
 #include <algorithm>
 #include <random>
 
+std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vecB) {
+    /**
+     * @brief Multiply two vectors pointwise and recieve a new vector of the same size.
+     * 
+     */
+    std::vector<float> result;
+    if(vecA.size() != vecB.size()) {
+        throw "pointwiseMult: pointwise multiplication error. Both vectors must be of equal size.";
+    }
+    for(int i = 0; i < vecA.size(); i++) {
+        result.push_back(vecA[i] * vecB[i]);
+    }
+    return result;
+}
+
+
+
 enum activationFunction {
     relu,
     sigmoid,
@@ -127,15 +144,60 @@ class Matrix {
     friend std::ostream& operator<<(std::ostream& out, Matrix &m);
     friend Matrix operator*(Matrix& A, Matrix& B);
 };
+
+std::vector<float> getFeatureWiseAverage(Matrix m) {
+    /**
+     * @brief Gets the average per feature value for an input matrix m.
+     * 
+     */
+    std::vector<float> result;
+    float inv_size = 1 / m.nRow;
+    for(int i = 0; i < m.nCol; i++) {
+        result.push_back(0);
+    }
+
+    for(int i = 0; i < m.nRow; i++) {
+        for(int j = 0; j < m.nCol; j++) {
+            result[j] += (m.getValAt(i, j) * inv_size);
+        }    
+    }
+    return result;
+}
+
+std::vector<float> getDeltaCrossEntropy(Matrix softmaxOutputs, std::vector<int> labels) {
+    /**
+     * @brief Calculates delta values for the output layer.
+     * 
+     * 
+     */
+    Matrix batchDeltas(softmaxOutputs);
+    std::vector<float> result;
+    for(int i = 0; i < softmaxOutputs.nCol; i++) {
+        result.push_back(0);
+    }
+
+    for(int i = 0; i < labels.size(); i++) {
+        batchDeltas.setValAt(i, labels[i], batchDeltas.getValAt(i, labels[i]) -1);
+        for (int j = 0; j < batchDeltas.nCol; j++) {
+            result[j] += batchDeltas.getValAt(i, j);
+        }
+    }
+    // take average across batch
+    for(int i = 0; i < result.size(); i++) {
+        result[i] /= labels.size();
+    }
+    return result;
+}
+
 class DataSet {
     public:
     std::vector<DataPoint> points;
     std::vector<int> classes; // contains all the possible classes.
     std::vector<int> labels; // contains the classes of all points.
-    Matrix trainData;
+    std::vector<DataPoint> trainData;
     std::vector<int> trainLabels;
 
-    Matrix testData;
+    std::vector<DataPoint> testData;
     std::vector<int> testLabels;
     float trainTestSplit = 0.9;
     DataSet(int numPoints, int numC){
@@ -177,7 +239,7 @@ class DataSet {
         for(int i = 0; i < splitBoundaryIdx; i++) {
             trainPoints.push_back(points[i]);
         }
-        trainData = getMatrix(trainPoints);
+        trainData = trainPoints;
         
         std::vector<int> tmpTrainLabels;
         for(int i = 0; i < trainPoints.size(); i++) {
@@ -189,7 +251,7 @@ class DataSet {
         for(int i = splitBoundaryIdx; i < points.size(); i++) {
             testPoints.push_back(points[i]);
         }
-        testData = getMatrix(testPoints);
+        testData = testPoints;
 
         std::vector<int> tmpTestLabels;
         for(int i = 0; i < testPoints.size(); i++) {
@@ -205,7 +267,7 @@ class DataSet {
         }
         return toReturn;
     }
-    Matrix getMatrix(std::vector<DataPoint> pointSubset) {
+    static Matrix getMatrix(std::vector<DataPoint> pointSubset) {
         std::vector<float> weights;
         for(int i = 0; i < pointSubset.size(); i++) {
             weights.push_back(pointSubset[i].x);
@@ -331,32 +393,42 @@ class Layer {
 
     std::vector<float> backward(Layer& leftLayer);
     void setLocalGradients(std::vector<float> localGradients);
-    void Layer::updateWeightsAndBiases();
+    void updateWeightsAndBiases();
 
     friend std::ostream& operator<<(std::ostream& out, Layer& l);
-};
+}; // class Layer
 
 class Network {
     public:
     std::vector<Layer> layers;
     std::vector<Matrix> deltas;
-    void forward(Matrix input) {
+    std::vector<float> avgBatchInputs;
+    Matrix forward(Matrix input) {
         layers[0].forward(input);
         for(int l = 1; l < layers.size(); l++) {
             layers[l].forward(layers[l-1].previousOutput);
         }
+        avgBatchInputs = getFeatureWiseAverage(input);
+        return layers[layers.size() - 1].previousOutput;
     }
     void backward(std::vector<int> labels) {
-        // TODO implement
         std::vector<float> crossEntropyDeltas = getDeltaCrossEntropy(layers[layers.size() - 1].previousOutput, labels);
-        int depth = 0;
-        for(int l = layers.size() - 1; l >= 0; l--) {
-            
-            depth++;
+        // set local gradients for output layer.
+        layers[layers.size() -1].setLocalGradients(crossEntropyDeltas);
+        // handle layers besides input layer
+        for(int l = layers.size() - 1; l > 0; l--) {
+            layers[l-1].setLocalGradients(layers[l].backward(layers[l-1]));
+        }
+
+        // handle input layer
+        Matrix inputLayerDeltaWeights(avgBatchInputs, layers[0].nodeLocalGradients);
+
+        for(int l =0; l < layers.size(); l++) {
+            layers[l].updateWeightsAndBiases();
         }
     }
 
-};
+}; // class Network
 const float eps = 1e-7;
 float clipVal(float val) {
     /**
@@ -368,8 +440,7 @@ float clipVal(float val) {
     return val;
 }
 
-
-std::vector<float> getBatchLoss(Matrix output, std::vector<float> labels) {
+std::vector<float> getBatchLoss(Matrix output, std::vector<int> labels) {
     std::vector<float> losses;
     for(int i = 0; i < output.nRow; i++) {
         losses.push_back(
@@ -379,7 +450,6 @@ std::vector<float> getBatchLoss(Matrix output, std::vector<float> labels) {
     return losses;
 }
 
-
 float meanLoss(std::vector<float> losses) {
     float total = 0;
     for(int i = 0; i < losses.size(); i++) {
@@ -387,6 +457,35 @@ float meanLoss(std::vector<float> losses) {
     }
     return total/losses.size();
 }
+
+class Trainer {
+    public:
+    Network network;
+    DataSet dataset;
+    Trainer(Network n, DataSet d ) : network(n), dataset(d){}
+    void train(int batchSize) {
+        // create batches and loop through them
+        int numBatches = dataset.trainData.size() / batchSize;
+        for(int i = 0; i < numBatches; i++) {
+            std::vector<DataPoint> batchData;
+            for(int j =0; j < batchSize; j++) {
+                batchData.push_back(dataset.trainData[i*batchSize + j]);
+            }
+            Matrix batch = DataSet::getMatrix(batchData);
+            std::vector<int> batchLabels;
+            for(int j = 0; j < batchData.size(); j++) {
+                batchLabels.push_back(batchData[j].label);
+            }
+
+            Matrix batchOutput = network.forward(batch);
+            std::cout << "training batch loss: " << meanLoss(getBatchLoss(batchOutput, batchLabels)) << std::endl;
+
+        }
+
+    }
+};
+
+
 
 
 std::vector<int> getPredictions(Matrix output) {
@@ -414,25 +513,7 @@ float accuracy(Matrix output, std::vector<float> labels) {
     }
     return (float) numCorrect/labels.size();
 }
-std::vector<float> getDeltaCrossEntropy(Matrix softmaxOutputs, std::vector<int> labels) {
-    Matrix batchDeltas(softmaxOutputs);
-    std::vector<float> result;
-    for(int i = 0; i < softmaxOutputs.nCol; i++) {
-        result.push_back(0);
-    }
 
-    for(int i = 0; i < labels.size(); i++) {
-        batchDeltas.setValAt(i, labels[i], batchDeltas.getValAt(i, labels[i]) -1);
-        for (int j = 0; j < batchDeltas.nCol; j++) {
-            result[j] += batchDeltas.getValAt(i, j);
-        }
-    }
-    // take average across batch
-    for(int i = 0; i < result.size(); i++) {
-        result[i] /= labels.size();
-    }
-    return result;
-}
 int main() {
     // std::vector<float> inputs = {
     //     1, 2, 3, 2.5,
@@ -473,13 +554,16 @@ int main() {
     Network network;
     network.layers.push_back(layer1);
     network.layers.push_back(layer2);
+    Trainer trainer(network, test);
+    trainer.train(10);
+
     // network.forward(dataSetMat);
     // std::cout << l2out << "\n\n\n" << std::endl;
-    std::cout << network.layers[1].previousOutput << "\n\n\n" << std::endl;
-    std::vector<float> dce = getDeltaCrossEntropy(network.layers[1].previousOutput, test.labels);
-    for(int i = 0; i < dce.size(); i++) {
-        std::cout << dce[i] << std::endl;
-    }
+    // std::cout << network.layers[1].previousOutput << "\n\n\n" << std::endl;
+    // std::vector<float> dce = getDeltaCrossEntropy(network.layers[1].previousOutput, test.labels);
+    // for(int i = 0; i < dce.size(); i++) {
+    //     std::cout << dce[i] << std::endl;
+    // }
     // Matrix sampleMatrix(1, 3, {0.7, 0.1, 0.2});
     // std::vector<float> sampleLabels{0};
     // std::cout << "mean loss: "<< meanLoss(getBatchLoss(sampleMatrix, sampleLabels)) << std::endl;
@@ -593,17 +677,3 @@ Matrix operator*(Matrix& A, Matrix& B) {
     return Matrix(A.nRow, B.nCol, values);
 }
 
-std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vecB) {
-    /**
-     * @brief Multiply two vectors pointwise and recieve a new vector of the same size.
-     * 
-     */
-    std::vector<float> result;
-    if(vecA.size() != vecB.size()) {
-        throw "pointwiseMult: pointwise multiplication error. Both vectors must be of equal size.";
-    }
-    for(int i = 0; i < vecA.size(); i++) {
-        result.push_back(vecA[i] * vecB[i]);
-    }
-    return result;
-}
