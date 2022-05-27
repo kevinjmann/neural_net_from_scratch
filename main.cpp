@@ -23,7 +23,7 @@ std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vec
     return result;
 }
 
-
+const float LEARNING_RATE = 1;
 
 enum activationFunction {
     relu,
@@ -211,7 +211,6 @@ class DataSet {
     public:
     std::vector<DataPoint> points;
     std::vector<int> classes; // contains all the possible classes.
-    std::vector<int> labels; // contains the classes of all points.
     std::vector<DataPoint> trainData;
     std::vector<int> trainLabels;
 
@@ -230,12 +229,9 @@ class DataSet {
         for(int i = 0; i < numC; i++) {
             for(int ix = 0; ix < numPoints; ix++) {
                 float r = (float) (ix) / numPoints;
-                // std::cout << "r: " << r << std::endl;
                 float t = (float)(((i+1)*4 - (i * 4)) *(i+1)* ix)/numPoints + static_cast <float> (std::rand()) / static_cast <float> (RAND_MAX) * 0.5f;
-                // std:: cout << "t: " << t << std::endl;
                 DataPoint dp({{(float) (r*sin(t*2.5)), (float)(r*cos(t*2.5))}, i});
                 points.push_back(dp);
-                // labels.push_back(i);
             }
         }
 
@@ -253,15 +249,7 @@ class DataSet {
         std::shuffle(std::begin(points), std::end(points), rng);
     }
     void initializeTrainTestData() {
-        // std::cout << "points before shuffle" << std::endl;
-        // for(int i = 0; i < points.size(); i++) {
-        //     std::cout << i << ": " << points[i] << std::endl;
-        // }
         shuffleData();
-        // std::cout << "\n\npoints after shuffle: " << std::endl;
-        // for(int i = 0; i < points.size(); i++) {
-        //     std::cout << i << ": " << points[i] << std::endl;
-        // } 
         int splitBoundaryIdx = floor(trainTestSplit * points.size());
         std::vector<DataPoint> trainPoints;
         for(int i = 0; i < splitBoundaryIdx; i++) {
@@ -359,7 +347,7 @@ class Layer {
 
     }
 
-    std::vector<float> activateRow(std::vector<float> row, int numVals) {
+    std::vector<float> activateRow(std::vector<float> row) {
         /**
          * @brief Applies an activation function to an output row.
          * 
@@ -371,22 +359,26 @@ class Layer {
         }
         switch(activationFunctionId) {
             case relu:
-                for(int i = 0; i < numVals; i++) {
+                for(int i = 0; i < row.size(); i++) {
                     row[i] = row[i] > 0 ? row[i] : 0;
                 }
                 break;
             case step:
-                for(int i=0; i < numVals; i++) {
+                for(int i=0; i < row.size(); i++) {
                     row[i] = row[i] > 0 ? 1 : 0;
                 }
                 break;
             case sigmoid:
-                for(int i=0; i < numVals; i++) {
-                    row[i] = 1/(1 + std::exp(row[i]));
+                for(int i=0; i < row.size(); i++) {
+                    if(row[i] < 0) {
+                        row[i] = std::exp(row[i])/(1 + std::exp(row[i]));
+                    }else {
+                        row[i] = 1/(1 + std::exp(-row[i]));
+                    }
                 }
                 break;
             case softmax:
-                for(int i=0; i < numVals; i++) {
+                for(int i=0; i < row.size(); i++) {
                     row[i] = std::exp(row[i]) / totalExp;
                 }
                 break;
@@ -401,9 +393,7 @@ class Layer {
          * @brief Run input through a forward pass of the layer. Keep track of the avg. output for each node for later backpropagation.
          * 
          */
-        this->previousOutput = input*weights; // FIXME might be calculated incorrectly. Seemingly multiplied two matrices together with incompatible dimensions.
-        // std::cout << "previousOutput\n";
-        // std::cout << this->previousOutput << std::endl;
+        this->previousOutput = input*weights;
         std::vector<float> avgOutputAccumulator;
         float inv_batch_size = (float) 1 / previousOutput.nRow;
         for(int i= 0; i < previousOutput.nCol; i++) {
@@ -414,32 +404,26 @@ class Layer {
             for(int j = 0; j < previousOutput.nCol; j++) {
                 this->previousOutput.setValAt(i,j, this->previousOutput.getValAt(i, j) + this->biases[j]);
             }
-            std::vector<float> activatedRow = getSoftmax(this->previousOutput.getRow(i).weights);
-            // std::cout << "activated row vals\n";
+            std::vector<float> activatedRow = activateRow(this->previousOutput.getRow(i).weights);
             for(int j =0; j < activatedRow.size(); j++) {
                 this->previousOutput.setValAt(i, j, activatedRow[j]);
-                // std::cout << activatedRow[j] << std::endl;
             }
-            // std::cout << "previousOUtput after activation\n";
-            // std::cout << previousOutput << std::endl;
             for(int j = 0; j < this->weights.nCol; j++) {
-                avgOutputAccumulator[j] += this->previousOutput.weights[i*this->weights.nCol + j] * inv_batch_size;
+                avgOutputAccumulator[j] += this->previousOutput.weights[i*this->weights.nCol + j];
             }
             
         }
+        for(int i =0; i < avgOutputAccumulator.size(); i++) {
+            avgOutputAccumulator[i] = avgOutputAccumulator[i] / input.nRow;
+        }
 
         avgActivatedOutput = avgOutputAccumulator;
-        // std::cout << "avgActivatedOutput for batch\n";
-        // for(int i= 0; i < avgActivatedOutput.size(); i++) {
-        //     std::cout << avgActivatedOutput[i] << " ";
-        // }
-        // std::cout << "\n";
         return previousOutput;
     }
 
     std::vector<float> backward(Layer& leftLayer);
     void setLocalGradients(std::vector<float> localGradients);
-    void updateWeightsAndBiases(); // FIXME deltaweights seems to change between batches, but weights don't actually change?
+    void updateWeightsAndBiases();
 
     friend std::ostream& operator<<(std::ostream& out, Layer& l);
 }; // class Layer
@@ -464,25 +448,16 @@ class Network {
         layers[layers.size() -1].setLocalGradients(crossEntropyDeltas);
         // handle layers besides input layer
         for(int l = layers.size() - 1; l > 0; l--) {
+            // TODO clip these local gradients to mitigate exploding gradient.
             std::vector<float> l_1_local_gradients = layers[l].backward(layers[l-1]);
-            // std::cout << "local gradients value" << std::endl;
-            // for(int i =0; i < l_1_local_gradients.size(); i++) {
-            //     std::cout << l_1_local_gradients[i] << std::endl;
-            // }
             layers[l-1].setLocalGradients(l_1_local_gradients);
         }
 
         // handle input layer
         Matrix inputLayerDeltaWeights(layers[0].nodeLocalGradients, avgBatchInputs);
-        // std::cout << "inputLayerDeltaWeights" << std::endl;
-        // std::cout << inputLayerDeltaWeights << std::endl;
         layers[0].deltaWeights = inputLayerDeltaWeights;
         for(int l =0; l < layers.size(); l++) {
-            // std::cout << "layer " << l <<"before update" << std::endl;
-            // std::cout << layers[l].weights << "\n\n" <<std::endl;
             layers[l].updateWeightsAndBiases();
-            // std::cout << "layer " << l <<"after update" << std::endl;
-            // std::cout << layers[l].weights << "\n\n" <<std::endl;
         }
     }
 
@@ -549,7 +524,11 @@ class Trainer {
     void train(int batchSize, int nEpochs) {
         // create batches and loop through them
         int numBatches = dataset.trainData.size() / batchSize;
+        float epochAccuracy;
+        float epochLoss;
         for(int e = 0; e < nEpochs; e++) {
+            epochAccuracy = 0;
+            epochLoss = 0;
             for(int i = 0; i < numBatches; i++) {
                 std::vector<DataPoint> batchData;
                 for(int j =0; j < batchSize; j++) {
@@ -560,16 +539,21 @@ class Trainer {
                 for(int j = 0; j < batchData.size(); j++) {
                     batchLabels.push_back(batchData[j].label);
                 }
-                // std::cout << "\n\nbatch output:" << std::endl;
+                // FIXME updating weights for batches should be done with the sum of the deltas for all samples in the batch.
+                // Currently, you average together the inputs and deltas for a whole batch which is incorrect.
                 Matrix batchOutput = network.forward(batch);
                 network.backward(batchLabels);
-                // std::cout << i << "\n" << std::endl;
-                std::cout << "batch\n" << batch << std::endl;
-                std::cout << "batchOutput\n" << batchOutput << std::endl;
-                std::cout << "\n\n\n";
-                if (i == (numBatches - 1)) {
-                    std::cout << "training epoch loss: " << meanLoss(getBatchLoss(batchOutput, batchLabels)) << std::endl;
-                    std::cout << "training accuracy: " << accuracy(batchOutput, batchLabels) << std::endl;
+
+                // if (i == (numBatches - 1)) {
+                    float batchAcc = accuracy(batchOutput, batchLabels);
+                    float batchLoss = meanLoss(getBatchLoss(batchOutput, batchLabels));
+                    epochAccuracy += batchAcc;
+                    epochLoss += batchLoss;
+                    // std::cout << "training loss for batch: " << meanLoss(getBatchLoss(batchOutput, batchLabels)) << std::endl;
+                    // std::cout << "training accuracy for batch: " << accuracy(batchOutput, batchLabels) << std::endl;
+                // }
+                if(i == (numBatches - 1)) {
+                    std::cout << "end epoch " << e << " with accuracy: " << epochAccuracy << "/" << dataset.trainData.size() << "; loss->" << epochLoss << std::endl; 
                 }
 
             }
@@ -584,23 +568,26 @@ void testVerySimpleData() {
     float feat;
     float feat2;
     int label;
-    for(int i = 0; i <100; i++) {
-        feat = (float) (std::rand() % 50);
-        feat2 = (float) (std::rand() % 50);
-        label = (feat + feat2) > 50 ? 1 : 0;
-        DataPoint point({{feat, feat2}, label});
+    for(int i = 0; i <1000; i++) {
+        feat = (float) (static_cast <float> (std::rand()) / static_cast <float> (RAND_MAX));
+        label = feat > 0.5f ? 1 : 0;
+        DataPoint point({{feat}, label});
         points.push_back(point);
     }
     DataSet dataset(points);
-    Layer layer1(2, 4);
+    Layer layer1(1, 2);
     layer1.activationFunctionId = sigmoid;
-    Layer layer2(4, 2);
-    layer2.activationFunctionId = softmax;
+    Layer layer2(2, 2);
+    layer2.activationFunctionId = sigmoid;
+    Layer layer3(2, 2);
+    layer3.activationFunctionId = softmax;
     Network network;
     network.layers.push_back(std::move(layer1));
     network.layers.push_back(std::move(layer2));
+    network.layers.push_back(std::move(layer3));
+
     Trainer trainer(network, dataset);
-    trainer.train(5, 4);
+    trainer.train(1, 1000);
 
 }
 
@@ -609,12 +596,51 @@ void testSpiralData() {
     Layer layer1(2, 4);
     layer1.activationFunctionId = sigmoid;
     Layer layer2(4, 3);
-    layer2.activationFunctionId = softmax;
+    layer2.activationFunctionId = sigmoid;
+    Layer layer3(3, 3);
+    layer3.activationFunctionId = sigmoid;
+    Layer layer4(3, 3);
+    layer4.activationFunctionId = sigmoid;
+    Layer layer5(3, 2);
+    layer5.activationFunctionId = softmax;
     Network network;
     network.layers.push_back(layer1);
     network.layers.push_back(layer2);
+    network.layers.push_back(layer3);
+    network.layers.push_back(layer4);
+    network.layers.push_back(layer5);
     Trainer trainer(network, spiralDataSet);
     trainer.train(5, 5);
+}
+
+/**
+ * @brief Simple average pooling for square inputs for compression the number of features for learning MNIST.
+ * returns a compressed version of the input by a factor of compressionFactor.
+ * @param inputFeatures 
+ * @param compressionFactor 
+ * @return std::vector<float>
+ */
+std::vector<float> pool(std::vector<float> inputFeatures, int compressionFactor) {
+    
+    int originalSideLength = (int) std::sqrt(inputFeatures.size());
+    int compressedSideLength = originalSideLength / compressionFactor;
+    int curRow = 0;
+    int curCol = 0;
+    int convolutionArea = compressionFactor * compressionFactor;
+    std::vector<float> result;
+    for(int i = 0; i < compressedSideLength; i++) {
+        for(int j = 0; j < compressedSideLength; j++) {
+            float curSquareSum = 0;
+            for(int k = i*compressionFactor; k < (i+1)*compressionFactor; k++){
+                for(int l = j*compressionFactor; l < (j +1) * compressionFactor; l++) {
+                    int index = k*originalSideLength + l;
+                    curSquareSum += inputFeatures[index];
+                }
+            }
+            result.push_back(curSquareSum / convolutionArea);
+        }
+    }
+    return result;
 }
 
 void testMnistData() {
@@ -651,25 +677,30 @@ void testMnistData() {
     for(int i= 0; i < mnistData.size(); i++) {
         mnistData[i].label = tmpLabels[i];
     }
-    DataSet mnistDataSet(mnistData);
+    std::vector<DataPoint> convolutedMnistData;
+    for(DataPoint dp : mnistData) {
+        DataPoint convDp;
+        convDp.features = pool(dp.features, 7);
+        convDp.label = dp.label;
+        convolutedMnistData.push_back(std::move(convDp));
+    } 
+    DataSet mnistDataSet(convolutedMnistData);
     Matrix mnistMat = DataSet::getMatrix(mnistDataSet.points);
     std::cout << "mnist size\n" << mnistMat.nRow << ", " << mnistMat.nCol << std::endl; 
-    Layer layer1(784, 20);
+    Layer layer1(16, 8);
     layer1.activationFunctionId = sigmoid;
-    Layer layer2(20, 10);
+
+    Layer layer2(8, 10);
     layer2.activationFunctionId = softmax;
 
     Network network;
-    network.layers.push_back(layer1);
-    network.layers.push_back(layer2);
+    network.layers.push_back(std::move(layer1));
+    network.layers.push_back(std::move(layer2));
     Trainer trainer(network, mnistDataSet);
-    trainer.train(32, 5);
+    trainer.train(1, 1000);
 }
 
-int main() {
-    std::vector<float> softmaxRes = getSoftmax({32.3847, 24.3366, 17.2382, 37.0107});
-    std::vector<float> originalFxnRes = activateRowCopy({32.3847, 24.3366, 17.2382, 37.0107}, 4);
-    
+int main() {    
     testVerySimpleData();
     // testSpiralData();
     // testMnistData();
@@ -699,35 +730,16 @@ std::vector<float> Layer::backward(Layer& leftLayer){
      * 
      */
     Matrix deltaWeightsToSet(nodeLocalGradients, leftLayer.avgActivatedOutput);
-    // std::cout << "\n\nleftLayer avg activated output" << std::endl;
-    // for(int i= 0; i < leftLayer.avgActivatedOutput.size(); i++) {
-    //     std::cout << leftLayer.avgActivatedOutput[i] << std::endl;
-    // }
-    // std::cout << "\n\nnodeLocalGradients\n";
-    // for(int j = 0; j < nodeLocalGradients.size(); j++) {
-    //     std::cout << nodeLocalGradients[j] << std::endl;
-    // }
-    // std::cout << "deltaWeightsToSet" << std::endl;
-    // std::cout << deltaWeightsToSet << std::endl;
+    // TODO get rid of needless copying
     deltaWeights = Matrix(deltaWeightsToSet);
-    // std::cout << "\n\ndeltaweights" << std::endl;
-    // std::cout << deltaWeights << std::endl;
-    // std::cout << "weights" << std::endl;
-    // std::cout << weights << std::endl;
     std::vector<float> localGradientCopy;
     for(int i= 0; i < nodeLocalGradients.size(); i++) {
         localGradientCopy.push_back(nodeLocalGradients[i]);
     }
-    // std::cout << "local gradient copy\n\n";
-    // for(int i = 0; i < localGradientCopy.size(); i++) {
-    //     std::cout << localGradientCopy[i] << std::endl;
-    // }
     Matrix localGradientMat(nodeLocalGradients.size(), 1, localGradientCopy);
-    // std::cout << "local gradient mat\n";
-    // std::cout << localGradientMat << std::endl;
+
     Matrix leftLayerLocalGradientsMat = weights * localGradientMat;
-    // std::cout << "leftLayerLocalGradientsMat" << std::endl;
-    // std::cout << leftLayerLocalGradientsMat << std::endl;
+
     std::vector<float> activationFunctionComponent;
     float curValue;
     switch(leftLayer.activationFunctionId) {
@@ -748,15 +760,9 @@ std::vector<float> Layer::backward(Layer& leftLayer){
 }
 
 void Layer::updateWeightsAndBiases() {
-    // std::cout << "weights:" << std::endl;
-    // std::cout << weights << "\n\n\n";
-    // std::cout << "delta weights" << std::endl;
-    // std::cout << deltaWeights << "\n\n\n";
-
-    // FIXME deltaWeights values are very low, on the order of 1e-26 vs weight value on order of 1e-1
     for(int i = 0; i < weights.nRow; i++) {
         for(int j = 0; j < weights.nCol; j++) {
-            weights.setValAt(i, j, weights.getValAt(i, j) + 0.5 * deltaWeights.getValAt(i, j));
+            weights.setValAt(i, j, weights.getValAt(i, j) - LEARNING_RATE * deltaWeights.getValAt(i, j));
         }
     }
     for(int i = 0; i < biases.size(); i++) {
