@@ -7,6 +7,13 @@
 #include <random>
 #include <sstream>
 #include <iterator>
+#include <stdexcept>
+// random device class instance, source of 'true' randomness for initializing random seed
+std::random_device rd; 
+
+// Mersenne twister PRNG, initialized with seed from previous random device instance
+std::mt19937 gen(rd());
+std::normal_distribution<float> d(0, 1.0f);
 
 std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vecB) {
     /**
@@ -15,7 +22,7 @@ std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vec
      */
     std::vector<float> result;
     if(vecA.size() != vecB.size()) {
-        throw "pointwiseMult: pointwise multiplication error. Both vectors must be of equal size.";
+        throw std::invalid_argument("pointwiseMult: pointwise multiplication error. Both vectors must be of equal size.");
     }
     for(int i = 0; i < vecA.size(); i++) {
         result.push_back(vecA[i] * vecB[i]);
@@ -23,7 +30,33 @@ std::vector<float> pointwiseMult(std::vector<float> vecA, std::vector<float> vec
     return result;
 }
 
-const float LEARNING_RATE = 1;
+std::vector<float> getUnitVectorIfMagGreaterThan(std::vector<float> input, int maxMagnitude) {
+    std::vector<float> result(input.size());
+    float magnitude = 0;
+    for(int i = 0; i < input.size(); i++) {
+        magnitude += (input[i] * input[i]);
+    }
+    magnitude = std::sqrt(magnitude);
+    if(magnitude <= maxMagnitude) return input;
+    for(int i = 0; i < input.size(); i++) {
+        result[i] = input[i]/magnitude;
+    }
+    return result;
+}
+
+// Matrix pointwiseMult(Matrix a, Matrix b) {
+//     if(a.nRow != b.nRow && a.nCol != b.nCol) {
+//         throw "pontwiseMullt: pointwise multiplication error. Both matrices must have equal dimensions.";
+//     }
+//     Matrix result(a);
+//     for(int i = 0; i < result.weights.size(); i++) {
+//         result.weights[i] *= b.weights[i];
+//     }
+//     return result;
+// }
+
+const float LEARNING_RATE = 0.1f;
+
 
 enum activationFunction {
     relu,
@@ -64,7 +97,7 @@ class Vector {
     }
     float dot(Vector a) {
         if(length != a.length) {
-            throw "lengths do not match, dot product could not be calculated";
+            throw std::invalid_argument("lengths do not match, dot product could not be calculated");
         }
         float res = 0;
         for(int i = 0; i < length; i++) {
@@ -95,11 +128,11 @@ class Matrix {
          * @brief Create a matrix from two vectors by multipling them into a grid. Used to calculate delta weight values.
          * 
          */
-        nCol = vec1.size();
-        nRow = vec2.size();
+        nRow = vec1.size();
+        nCol = vec2.size();
         for (int i = 0; i < nRow; i++) {
             for (int j = 0; j < nCol; j++) {
-                weights.push_back(vec1[j] * vec2[i]);
+                weights.push_back(vec1[i] * vec2[j]);
             }
         }
     }
@@ -125,7 +158,7 @@ class Matrix {
     }
     Vector getRow(int i) {
         if(i > nRow || i < 0) {
-            throw "getRow: invalid row index";
+            throw std::invalid_argument("getRow: invalid row index");
         }
         std::vector<float> resWeights;
         int initialPos = i*nCol;
@@ -139,7 +172,7 @@ class Matrix {
     }
     Vector getCol(int i) {
         if(i > nCol || i < 0) {
-            throw "getCol: invalid colummn id";
+            throw std::invalid_argument("getCol: invalid colummn id");
         }
         std::vector<float> resWeights;
         int initialPos = i;
@@ -158,7 +191,8 @@ class Matrix {
         return weights[r*nCol + c];
     }
 
-    void transpose();
+    Matrix transpose();
+    void add(Matrix& m);
     friend std::ostream& operator<<(std::ostream& out, Matrix &m);
     friend Matrix operator*(Matrix& A, Matrix& B);
 };
@@ -182,29 +216,18 @@ std::vector<float> getFeatureWiseAverage(Matrix m) {
     return result;
 }
 
-std::vector<float> getDeltaCrossEntropy(Matrix softmaxOutputs, std::vector<int> labels) {
+Matrix getDeltaCrossEntropy(Matrix softmaxOutputs, std::vector<int> labels) {
     /**
-     * @brief Calculates delta values for the output layer.
-     * 
+     * @brief Calculates the gradient values for the output layer assuming softmax activation.
+     * Calculates all the output gradients for a batch.
      * 
      */
     Matrix batchDeltas(softmaxOutputs);
-    std::vector<float> result;
-    for(int i = 0; i < softmaxOutputs.nCol; i++) {
-        result.push_back(0);
-    }
 
     for(int i = 0; i < labels.size(); i++) {
-        batchDeltas.setValAt(i, labels[i], batchDeltas.getValAt(i, labels[i]) -1);
-        for (int j = 0; j < batchDeltas.nCol; j++) {
-            result[j] += batchDeltas.getValAt(i, j);
-        }
+        batchDeltas.setValAt(labels[i], i, batchDeltas.getValAt(labels[i], i) -1);
     }
-    // take average across batch
-    for(int i = 0; i < result.size(); i++) {
-        result[i] /= labels.size();
-    }
-    return result;
+    return batchDeltas;
 }
 
 class DataSet {
@@ -283,14 +306,21 @@ class DataSet {
         }
         return toReturn;
     }
+
+    /**
+     * @brief Get a matrix of a subset of data. Each sample corresponds to a column vector in the resulting matrix.
+     * 
+     * @param pointSubset 
+     * @return Matrix 
+     */
     static Matrix getMatrix(std::vector<DataPoint> pointSubset) {
         std::vector<float> weights;
-        for(int i = 0; i < pointSubset.size(); i++) {
-            for(int j =0; j < pointSubset[i].features.size(); j++) {
+        for(int j =0; j < pointSubset[0].features.size(); j++) {
+            for(int i = 0; i < pointSubset.size(); i++) {
                 weights.push_back(pointSubset[i].features[j]);
             }
         }
-        Matrix m(pointSubset.size(), pointSubset[0].features.size(), weights);
+        Matrix m(pointSubset[0].features.size(), pointSubset.size(), weights);
         return m;
     }
 };
@@ -317,37 +347,37 @@ std::vector<float> getSoftmax(std::vector<float> x) {
 class Layer {
     std::vector<float> biases;
     public:
-    Matrix weights;
-    Matrix deltaWeights;
+    Matrix weightMatrix;
     Matrix previousOutput;
     activationFunction activationFunctionId;
 
     // values used in backpropagation
-    std::vector<float> avgUnactivatedOutput;
-    std::vector<float> avgActivatedOutput;
+    Matrix deltaWeights;
+    std::vector<float> deltaBiases;
     std::vector<float> nodeLocalGradients; // Note, also serves as a delta value for biases.
 
-    Layer(int numFeatures, int numNeurons) {
+    Layer(int numInputFeatures, int numOutputFeatures) {
         std::vector<float> initialWeights;
-        for(int i = 0; i < numFeatures * numNeurons; i++) {
-            float r = static_cast <float> (std::rand()) / static_cast <float> (RAND_MAX);
+        float inv_sqrt_output = 1.0 / std::sqrt(numOutputFeatures);
+        for(int i = 0; i < numInputFeatures * numOutputFeatures; i++) {
+            float r = d(gen) * inv_sqrt_output;
             initialWeights.push_back(r);
         }
         std::vector<float> resBiases;
-        for(int i =0; i < numNeurons; i++) {
+        for(int i =0; i < numOutputFeatures; i++) {
             // float r = static_cast <float> (std::rand()) / static_cast <float> (RAND_MAX);
             resBiases.push_back(0);
         }
-        Matrix m(numFeatures, numNeurons, initialWeights);
-        this->weights = m;
-        this->biases = resBiases;
+        Matrix m(numOutputFeatures, numInputFeatures, initialWeights);
+        this->weightMatrix = std::move(m);
+        this->biases = std::move(resBiases);
         activationFunctionId = step;
     }
-    Layer(Matrix m, std::vector<float> b, activationFunction fId=step): weights(m), biases(b), activationFunctionId(fId){
+    Layer(Matrix m, std::vector<float> b, activationFunction fId=step): weightMatrix(m), biases(b), activationFunctionId(fId){
 
     }
 
-    std::vector<float> activateRow(std::vector<float> row) {
+    std::vector<float> activate(std::vector<float> row) {
         /**
          * @brief Applies an activation function to an output row.
          * 
@@ -393,37 +423,25 @@ class Layer {
          * @brief Run input through a forward pass of the layer. Keep track of the avg. output for each node for later backpropagation.
          * 
          */
-        this->previousOutput = input*weights;
-        std::vector<float> avgOutputAccumulator;
-        float inv_batch_size = (float) 1 / previousOutput.nRow;
-        for(int i= 0; i < previousOutput.nCol; i++) {
-            avgOutputAccumulator.push_back(0);
-        }
+        this->previousOutput = weightMatrix * input;
 
-        for(int i = 0; i <previousOutput.nRow; i++) {
-            for(int j = 0; j < previousOutput.nCol; j++) {
-                this->previousOutput.setValAt(i,j, this->previousOutput.getValAt(i, j) + this->biases[j]);
+        for(int sampleIdx = 0; sampleIdx <previousOutput.nCol; sampleIdx++) {
+            for(int featureIdx = 0; featureIdx < previousOutput.nRow; featureIdx++) {
+                this->previousOutput.setValAt(featureIdx, sampleIdx, this->previousOutput.getValAt(featureIdx, sampleIdx) + this->biases[featureIdx]);
             }
-            std::vector<float> activatedRow = activateRow(this->previousOutput.getRow(i).weights);
-            for(int j =0; j < activatedRow.size(); j++) {
-                this->previousOutput.setValAt(i, j, activatedRow[j]);
-            }
-            for(int j = 0; j < this->weights.nCol; j++) {
-                avgOutputAccumulator[j] += this->previousOutput.weights[i*this->weights.nCol + j];
+            std::vector<float> activatedCol = activate(this->previousOutput.getCol(sampleIdx).weights);
+            for(int featureIdx =0; featureIdx < activatedCol.size(); featureIdx++) {
+                this->previousOutput.setValAt(featureIdx, sampleIdx, activatedCol[featureIdx]);
             }
             
         }
-        for(int i =0; i < avgOutputAccumulator.size(); i++) {
-            avgOutputAccumulator[i] = avgOutputAccumulator[i] / input.nRow;
-        }
 
-        avgActivatedOutput = avgOutputAccumulator;
         return previousOutput;
     }
 
-    std::vector<float> backward(Layer& leftLayer);
+    std::vector<float> backward(Layer& leftLayer, int sampleIdx);
     void setLocalGradients(std::vector<float> localGradients);
-    void updateWeightsAndBiases();
+    void updateWeightsAndBiases(int numSamples);
 
     friend std::ostream& operator<<(std::ostream& out, Layer& l);
 }; // class Layer
@@ -431,33 +449,63 @@ class Layer {
 class Network {
     public:
     std::vector<Layer> layers;
-    std::vector<Matrix> deltas;
-    std::vector<float> avgBatchInputs;
     Matrix forward(Matrix input) {
         layers[0].forward(input);
         for(int l = 1; l < layers.size(); l++) {
             layers[l].forward(layers[l-1].previousOutput);
         }
-        avgBatchInputs = getFeatureWiseAverage(input);
         return layers[layers.size() - 1].previousOutput;
     }
-    void backward(std::vector<int> labels) {
+
+    /**
+     * @brief set deltaWeights and deltaBiases for each layer to be full of zeroes.
+     * 
+     */
+    void initailizeDeltaWeightsAndBiases() {
+        for(int l = 0; l < layers.size(); l++) {
+            Matrix dWeights(layers[l].weightMatrix);
+            for(int i =0; i < layers[l].weightMatrix.weights.size(); i++) {
+                dWeights.weights[i] = 0;
+            }
+            layers[l].deltaWeights = std::move(dWeights);
+            std::vector<float> dBiases(layers[l].weightMatrix.nRow);
+            for(int i = 0; i < dBiases.size(); i++) {
+                dBiases[i] = 0;
+            }
+            layers[l].deltaBiases = std::move(dBiases);
+        } 
+    }
+
+    /**
+     * @brief Run backpropagation for a batch
+     * 
+     * @param labels 
+     */
+    void backpropagation(Matrix batchInput, std::vector<int> labels) {
+        initailizeDeltaWeightsAndBiases();
+        // Get local gradients for output layer for the whole batch.
+        Matrix batchCrossEntropyDeltas = getDeltaCrossEntropy(layers[layers.size() - 1].previousOutput, labels);
         
-        std::vector<float> crossEntropyDeltas = getDeltaCrossEntropy(layers[layers.size() - 1].previousOutput, labels);
-        // set local gradients for output layer.
-        layers[layers.size() -1].setLocalGradients(crossEntropyDeltas);
-        // handle layers besides input layer
-        for(int l = layers.size() - 1; l > 0; l--) {
-            // TODO clip these local gradients to mitigate exploding gradient.
-            std::vector<float> l_1_local_gradients = layers[l].backward(layers[l-1]);
-            layers[l-1].setLocalGradients(l_1_local_gradients);
+        // Go backward through layers for each sample.
+        for(int sampleIdx = 0; sampleIdx < labels.size(); sampleIdx++) {
+            // set local gradients for output layer.
+            layers[layers.size() -1].setLocalGradients(batchCrossEntropyDeltas.getCol(sampleIdx).weights);
+            // handle layers besides input layer
+            for(int l = layers.size() - 1; l > 0; l--) {
+                // TODO clip these local gradients to mitigate exploding gradient.
+                std::vector<float> l_1_local_gradients = layers[l].backward(layers[l-1], sampleIdx);
+                layers[l-1].setLocalGradients(l_1_local_gradients);
+            }
+            // handle input layer
+            Matrix inputLayerDeltaWeights(layers[0].nodeLocalGradients, batchInput.getCol(sampleIdx).weights );
+            layers[0].deltaWeights.add(inputLayerDeltaWeights);
+            for(int i = 0; i < layers[0].deltaBiases.size(); i++) {
+                layers[0].deltaBiases[i] += layers[0].nodeLocalGradients[i];
+            }
         }
 
-        // handle input layer
-        Matrix inputLayerDeltaWeights(layers[0].nodeLocalGradients, avgBatchInputs);
-        layers[0].deltaWeights = inputLayerDeltaWeights;
         for(int l =0; l < layers.size(); l++) {
-            layers[l].updateWeightsAndBiases();
+            layers[l].updateWeightsAndBiases(labels.size());
         }
     }
 
@@ -473,14 +521,13 @@ float clipVal(float val) {
     return val;
 }
 
-std::vector<float> getBatchLoss(Matrix output, std::vector<int> labels) {
-    std::vector<float> losses;
-    for(int i = 0; i < output.nRow; i++) {
-        losses.push_back(
-            -std::log(
-                clipVal(output.getValAt(i, labels[i]))));
+float getBatchLoss(Matrix output, std::vector<int> labels) {
+    float totalLoss = 0.0f;
+    for(int i = 0; i < output.nCol; i++) {
+        totalLoss += -std::log(
+                clipVal(output.getValAt(labels[i], i)));
     }
-    return losses;
+    return totalLoss / labels.size();
 }
 
 float meanLoss(std::vector<float> losses) {
@@ -492,12 +539,12 @@ float meanLoss(std::vector<float> losses) {
 }
 std::vector<int> getPredictions(Matrix output) {
     std::vector<int> predictions;
-    for(int i = 0; i < output.nRow; i++){
+    for(int i = 0; i < output.nCol; i++){
         float curMax = 0;
         int curMaxId = 0;
         float curVal;
-        for(int j =0; j < output.nCol; j++) {
-            curVal = output.getValAt(i, j);
+        for(int j =0; j < output.nRow; j++) {
+            curVal = output.getValAt(j, i);
             if(curVal > curMax) {
                 curMax = curVal;
                 curMaxId = j;
@@ -520,17 +567,26 @@ class Trainer {
     public:
     Network network;
     DataSet dataset;
-    Trainer(Network n, DataSet d ) : network(n), dataset(d){}
+    Matrix xVal;
+    std::vector<int> yVal;
+    Trainer(Network n, DataSet d ) : network(n), dataset(d){
+        std::vector<DataPoint> xValSubset;
+        std::vector<int> yValSubset;
+        for(int i =0; i < 100; i++) {
+            xValSubset.push_back(dataset.testData[i]);
+            yValSubset.push_back(dataset.testData[i].label);
+        }
+
+        xVal = DataSet::getMatrix(xValSubset);
+        yVal = std::move(yValSubset);
+    }
     void train(int batchSize, int nEpochs) {
         // create batches and loop through them
         int numBatches = dataset.trainData.size() / batchSize;
-        float epochAccuracy;
-        float epochLoss;
         for(int e = 0; e < nEpochs; e++) {
-            epochAccuracy = 0;
-            epochLoss = 0;
             for(int i = 0; i < numBatches; i++) {
                 std::vector<DataPoint> batchData;
+                // FIXME get batches as samples corresponding to column vectors
                 for(int j =0; j < batchSize; j++) {
                     batchData.push_back(dataset.trainData[i*batchSize + j]);
                 }
@@ -539,21 +595,18 @@ class Trainer {
                 for(int j = 0; j < batchData.size(); j++) {
                     batchLabels.push_back(batchData[j].label);
                 }
-                // FIXME updating weights for batches should be done with the sum of the deltas for all samples in the batch.
-                // Currently, you average together the inputs and deltas for a whole batch which is incorrect.
-                Matrix batchOutput = network.forward(batch);
-                network.backward(batchLabels);
 
-                // if (i == (numBatches - 1)) {
-                    float batchAcc = accuracy(batchOutput, batchLabels);
-                    float batchLoss = meanLoss(getBatchLoss(batchOutput, batchLabels));
-                    epochAccuracy += batchAcc;
-                    epochLoss += batchLoss;
-                    // std::cout << "training loss for batch: " << meanLoss(getBatchLoss(batchOutput, batchLabels)) << std::endl;
-                    // std::cout << "training accuracy for batch: " << accuracy(batchOutput, batchLabels) << std::endl;
-                // }
+                Matrix batchOutput = network.forward(batch);
+                network.backpropagation(batch, batchLabels);
+                std::vector<int> batchPredictions = getPredictions(batchOutput);
+                float batchAcc = accuracy(batchOutput, batchLabels);
+                float batchLoss = getBatchLoss(batchOutput, batchLabels);
+
                 if(i == (numBatches - 1)) {
-                    std::cout << "end epoch " << e << " with accuracy: " << epochAccuracy << "/" << dataset.trainData.size() << "; loss->" << epochLoss << std::endl; 
+                    Matrix valOutput = network.forward(xVal);
+                    float valAcc = accuracy(valOutput, yVal);
+                    float valLoss = getBatchLoss(valOutput, yVal);
+                    std::cout << "end epoch " << e << " with validation accuracy: " << valAcc << "; loss->" << valLoss << std::endl; 
                 }
 
             }
@@ -568,26 +621,27 @@ void testVerySimpleData() {
     float feat;
     float feat2;
     int label;
-    for(int i = 0; i <1000; i++) {
+    for(int i = 0; i <10000; i++) {
         feat = (float) (static_cast <float> (std::rand()) / static_cast <float> (RAND_MAX));
         label = feat > 0.5f ? 1 : 0;
         DataPoint point({{feat}, label});
         points.push_back(point);
     }
     DataSet dataset(points);
-    Layer layer1(1, 2);
+    Layer layer1(1, 8);
     layer1.activationFunctionId = sigmoid;
-    Layer layer2(2, 2);
-    layer2.activationFunctionId = sigmoid;
-    Layer layer3(2, 2);
+    Layer layer3(8, 2);
     layer3.activationFunctionId = softmax;
     Network network;
     network.layers.push_back(std::move(layer1));
-    network.layers.push_back(std::move(layer2));
     network.layers.push_back(std::move(layer3));
 
     Trainer trainer(network, dataset);
-    trainer.train(1, 1000);
+    trainer.train(5, 20);
+    Matrix testInput(5, 1, {0.2f, 0.6f, 0.5f, 0.1f, 0.9f});
+    Matrix result = network.forward(testInput);
+    std::cout << "test matrix result:\n";
+    std::cout << result << std::endl;
 
 }
 
@@ -644,7 +698,7 @@ std::vector<float> pool(std::vector<float> inputFeatures, int compressionFactor)
 }
 
 void testMnistData() {
-    std::ifstream mnistDataFile("mnist_data.dat");
+    std::ifstream mnistDataFile("mnist_x_train.dat");
     std::string line;
     std::vector<DataPoint> mnistData;
     int counter = 0;
@@ -666,7 +720,7 @@ void testMnistData() {
         }
         mnistDataFile.close();
     }
-    std::ifstream mnistLabelsFile("mnist_labels.dat");
+    std::ifstream mnistLabelsFile("mnist_y_train.dat");
     std::vector<int> tmpLabels;
     if(mnistLabelsFile.is_open()) {
         while(std::getline(mnistLabelsFile, line)) {
@@ -677,39 +731,45 @@ void testMnistData() {
     for(int i= 0; i < mnistData.size(); i++) {
         mnistData[i].label = tmpLabels[i];
     }
-    std::vector<DataPoint> convolutedMnistData;
-    for(DataPoint dp : mnistData) {
-        DataPoint convDp;
-        convDp.features = pool(dp.features, 7);
-        convDp.label = dp.label;
-        convolutedMnistData.push_back(std::move(convDp));
-    } 
-    DataSet mnistDataSet(convolutedMnistData);
-    Matrix mnistMat = DataSet::getMatrix(mnistDataSet.points);
-    std::cout << "mnist size\n" << mnistMat.nRow << ", " << mnistMat.nCol << std::endl; 
-    Layer layer1(16, 8);
+    // std::vector<DataPoint> convolutedMnistData;
+    // for(DataPoint dp : mnistData) {
+    //     DataPoint convDp;
+    //     convDp.features = pool(dp.features, 4);
+    //     convDp.label = dp.label;
+    //     convolutedMnistData.push_back(std::move(convDp));
+    // } 
+    DataSet mnistDataSet(mnistData);
+    // Matrix mnistMat = DataSet::getMatrix(mnistDataSet.points);
+    // std::cout << "mnist size\n" << mnistMat.nRow << ", " << mnistMat.nCol << std::endl;
+    Layer layer1(784, 128);
     layer1.activationFunctionId = sigmoid;
+    Layer layer2(128, 64);
+    layer2.activationFunctionId = sigmoid;
+    Layer layer3(64, 10);
+    layer3.activationFunctionId = softmax;
 
-    Layer layer2(8, 10);
-    layer2.activationFunctionId = softmax;
 
     Network network;
     network.layers.push_back(std::move(layer1));
     network.layers.push_back(std::move(layer2));
+    network.layers.push_back(std::move(layer3));
     Trainer trainer(network, mnistDataSet);
-    trainer.train(1, 1000);
+    trainer.train(1, 5);
 }
 
 int main() {    
-    testVerySimpleData();
+    // testVerySimpleData();
     // testSpiralData();
-    // testMnistData();
+    testMnistData();
 
 
     return 0;
 }
 
-void Matrix::transpose() {
+Matrix Matrix::transpose() {
+    Matrix m;
+    m.nRow = nCol;
+    m.nCol = nRow;
     std::vector<float> tWeights;
     for(int i=0; i < nCol; i++) {
         Vector v = getCol(i);
@@ -717,41 +777,59 @@ void Matrix::transpose() {
             tWeights.push_back(val);
         }
     }
-    
-    weights = tWeights;
-    int temp = nRow;
-    nRow = nCol;
-    nCol = temp;
+    m.weights = tWeights;
+    return m;
 }
 
-std::vector<float> Layer::backward(Layer& leftLayer){
+/**
+ * @brief Add the values in matrix m to those in the current matrix in place.
+ * 
+ * @param m 
+ */
+void Matrix::add(Matrix& m) {
+    if(m.nRow != nRow && m.nCol != nCol) {
+        std::string errorStr = std::to_string(m.nRow) + "x" + std::to_string(m.nCol) + "!=" + std::to_string(nRow) + "x" + std::to_string(nCol); 
+        throw std::invalid_argument("Matrix dimensionality error. Cannot add two matrices of unequal dimensions.");
+    }
+    for(int i=0; i < m.weights.size(); i++) {
+        this->weights[i] += m.weights[i];
+    }
+}
+
+std::vector<float> Layer::backward(Layer& leftLayer, int sampleIdx){
     /**
      * @brief Calculate the delta weights. Return local gradient values for next layer
      * 
      */
-    Matrix deltaWeightsToSet(nodeLocalGradients, leftLayer.avgActivatedOutput);
-    // TODO get rid of needless copying
-    deltaWeights = Matrix(deltaWeightsToSet);
+    std::vector<float> prevLayerOutput = leftLayer.previousOutput.getCol(sampleIdx).weights;
+    //========== increment deltaWeights and deltaBiases for the layer
+    Matrix deltaWeightsToIncrement(nodeLocalGradients, prevLayerOutput);
+    deltaWeights.add(deltaWeightsToIncrement);
+    for(int i = 0; i < deltaBiases.size(); i++) {
+        deltaBiases[i] += nodeLocalGradients[i];
+    }
+
+    //========== Calculate the local gradients for the next layer in backpropagation
     std::vector<float> localGradientCopy;
     for(int i= 0; i < nodeLocalGradients.size(); i++) {
         localGradientCopy.push_back(nodeLocalGradients[i]);
     }
     Matrix localGradientMat(nodeLocalGradients.size(), 1, localGradientCopy);
-
-    Matrix leftLayerLocalGradientsMat = weights * localGradientMat;
+    Matrix weight_T = weightMatrix.transpose();
+    Matrix leftLayerLocalGradientsMat = weight_T * localGradientMat;
 
     std::vector<float> activationFunctionComponent;
     float curValue;
     switch(leftLayer.activationFunctionId) {
         case relu:
-            for(int i = 0; i < leftLayer.avgActivatedOutput.size(); i++) {
-                curValue = leftLayer.avgActivatedOutput[i] > 0 ? 1 : 0;
+            for(int i = 0; i < prevLayerOutput.size(); i++) {
+                curValue = prevLayerOutput[i] > 0 ? 1 : 0;
                 activationFunctionComponent.push_back(curValue);
             }
             break;
         case sigmoid:
-            for(int i = 0; i < leftLayer.avgActivatedOutput.size(); i++) {
-                curValue = leftLayer.avgActivatedOutput[i] * (1 - leftLayer.avgActivatedOutput[i]);
+            for(int i = 0; i < prevLayerOutput.size(); i++) {
+                curValue = prevLayerOutput[i] * (1 - prevLayerOutput[i]);
                 activationFunctionComponent.push_back(curValue);
             } 
             break;
@@ -759,14 +837,14 @@ std::vector<float> Layer::backward(Layer& leftLayer){
     return pointwiseMult(leftLayerLocalGradientsMat.weights, activationFunctionComponent);
 }
 
-void Layer::updateWeightsAndBiases() {
-    for(int i = 0; i < weights.nRow; i++) {
-        for(int j = 0; j < weights.nCol; j++) {
-            weights.setValAt(i, j, weights.getValAt(i, j) - LEARNING_RATE * deltaWeights.getValAt(i, j));
+void Layer::updateWeightsAndBiases(int numSamples) {
+    for(int i = 0; i < weightMatrix.nRow; i++) {
+        for(int j = 0; j < weightMatrix.nCol; j++) {
+            weightMatrix.setValAt(i, j, weightMatrix.getValAt(i, j) - LEARNING_RATE/numSamples * deltaWeights.getValAt(i, j));
         }
     }
     for(int i = 0; i < biases.size(); i++) {
-        biases[i] -= nodeLocalGradients[i];
+        biases[i] -= LEARNING_RATE * deltaBiases[i] / numSamples;
     }
 }
 
@@ -792,7 +870,7 @@ std::ostream& operator<<(std::ostream& out, Vector& v) {
     return out;
 }
 std::ostream& operator<<(std::ostream& out, Layer& l){
-    out << "weights:\n" << l.weights << "\n\nbiases:" << std::endl;
+    out << "weights:\n" << l.weightMatrix << "\n\nbiases:" << std::endl;
     for(auto& val: l.biases) {
         out << val << std::endl;
     }
@@ -803,7 +881,7 @@ std::ostream& operator<<(std::ostream& out, Layer& l){
 Matrix operator*(Matrix& A, Matrix& B) {
     if(A.nCol != B.nRow) {
         std::cout << "matrix multiplication error: matrices don't have matching dimensions and cannot be multiplied" << std::endl;
-        throw "matrix multiplication error: matrices don't have matching dimensions and cannot be multiplied";
+        throw std::invalid_argument("matrix multiplication error: matrices don't have matching dimensions and cannot be multiplied");
     }
     std::vector<float> values;
     for(int i = 0; i < A.nRow; i++) {
@@ -815,4 +893,3 @@ Matrix operator*(Matrix& A, Matrix& B) {
     }
     return Matrix(A.nRow, B.nCol, values);
 }
-
