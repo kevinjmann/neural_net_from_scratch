@@ -38,8 +38,8 @@ var Module = typeof Module != 'undefined' ? Module : {};
         // web worker
         PACKAGE_PATH = encodeURIComponent(location.pathname.toString().substring(0, location.pathname.toString().lastIndexOf('/')) + '/');
       }
-      var PACKAGE_NAME = 'quick_example.data';
-      var REMOTE_PACKAGE_BASE = 'quick_example.data';
+      var PACKAGE_NAME = 'mnist_wasm.data';
+      var REMOTE_PACKAGE_BASE = 'mnist_wasm.data';
       if (typeof Module['locateFilePackage'] === 'function' && !Module['locateFile']) {
         Module['locateFile'] = Module['locateFilePackage'];
         err('warning: you defined Module.locateFilePackage, that has been renamed to Module.locateFile (using your locateFilePackage for now)');
@@ -171,10 +171,10 @@ var Module = typeof Module != 'undefined' ? Module : {};
           var files = metadata['files'];
           for (var i = 0; i < files.length; ++i) {
             DataRequest.prototype.requests[files[i].filename].onload();
-          }          Module['removeRunDependency']('datafile_quick_example.data');
+          }          Module['removeRunDependency']('datafile_mnist_wasm.data');
 
       };
-      Module['addRunDependency']('datafile_quick_example.data');
+      Module['addRunDependency']('datafile_mnist_wasm.data');
 
       if (!Module.preloadResults) Module.preloadResults = {};
 
@@ -1669,7 +1669,7 @@ function createExportWrapper(name, fixedasm) {
 }
 
 var wasmBinaryFile;
-  wasmBinaryFile = 'quick_example.wasm';
+  wasmBinaryFile = 'mnist_wasm.wasm';
   if (!isDataURI(wasmBinaryFile)) {
     wasmBinaryFile = locateFile(wasmBinaryFile);
   }

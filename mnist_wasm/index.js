@@ -5,10 +5,9 @@ const guessTxt = document.getElementById('txt-guess');
 const ctx = canvas.getContext('2d');
 
 const title = document.getElementById("title");
-const content = document.getElementById('content');
-
-canvas.width = 28;
-canvas.height = 28;
+const inputSideLength = 28;
+canvas.width = inputSideLength;
+canvas.height = inputSideLength;
 ctx.strokeStyle = 'black'
 let isPainting = false;
 let lineWidth = 2;
@@ -44,21 +43,10 @@ const draw = (e) => {
 }
 canvas.addEventListener('mousemove', draw)
 guessBtn.onclick = () => {
-    let rawInputData = new Module.VectorFloat();
-    let imData = ctx.getImageData(0, 0, 28, 28).data;
+    let inputData = new Module.VectorFloat();
+    let imData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
     for(let i = 3; i < imData.length; i+=4) {
-        rawInputData.push_back(imData[i]/255.0);
+        inputData.push_back(imData[i]/255.0);
     }
-    guessTxt.innerText = Module.doWasmInference(rawInputData);
-}
-
-let showContent = true;
-
-title.onclick = () => {
-    if(showContent) {
-        content.style.display = 'none';
-    } else {
-        content.style.display = 'block';
-    }
-    showContent = !showContent
+    guessTxt.innerText = Module.doWasmInference(inputData);
 }
