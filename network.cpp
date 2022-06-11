@@ -601,13 +601,12 @@ Trainer::Trainer(Network& n, DataSet d ) : network(n), dataset(d){
     xVal = getMatrix(xValSubset);
     yVal = std::move(yValSubset);
 }
-void Trainer::train(int batchSize, int nEpochs) {
+void Trainer::train(int batchSize, int nEpochs, std::string networkSaveFile) {
     // create batches and loop through them
     int numBatches = dataset.trainData.size() / batchSize;
     for(int e = 0; e < nEpochs; e++) {
         for(int i = 0; i < numBatches; i++) {
             std::vector<DataPoint> batchData;
-            // FIXME get batches as samples corresponding to column vectors
             for(int j =0; j < batchSize; j++) {
                 batchData.push_back(dataset.trainData[i*batchSize + j]);
             }
@@ -627,9 +626,10 @@ void Trainer::train(int batchSize, int nEpochs) {
                 Matrix valOutput = network.forward(xVal);
                 float valAcc = accuracy(valOutput, yVal);
                 float valLoss = getBatchLoss(valOutput, yVal);
-                std::cout << "end epoch " << e << " with validation accuracy: " << valAcc << "; loss->" << valLoss << std::endl; 
+                std::cout << "end epoch " << e << " with validation accuracy: " << valAcc << "; loss->" << valLoss << std::endl;
                 if(e == (nEpochs - 1)){
-                    network.saveToFile("mnistNetwork.dat");
+                    // FIXME only way to save progress on a network is through storing and reading in a file.
+                    network.saveToFile(networkSaveFile);
                 }
             }
 
@@ -660,7 +660,7 @@ void testVerySimpleData() {
     network.layers.push_back(std::move(layer3));
 
     Trainer trainer(network, dataset);
-    trainer.train(5, 20);
+    trainer.train(5, 20, "verySimpleNetwork.dat");
     Matrix testInput(5, 1, {0.2f, 0.6f, 0.5f, 0.1f, 0.9f});
     Matrix result = network.forward(testInput);
     std::cout << "test matrix result:\n";
@@ -687,7 +687,7 @@ void testSpiralData() {
     network.layers.push_back(layer4);
     network.layers.push_back(layer5);
     Trainer trainer(network, spiralDataSet);
-    trainer.train(5, 5);
+    trainer.train(5, 5, "spiralNetwork.dat");
 }
 
 /**
@@ -754,12 +754,13 @@ void testMnistData() {
     for(int i= 0; i < mnistData.size(); i++) {
         mnistData[i].label = tmpLabels[i];
     }
-    // std::vector<DataPoint> convolutedMnistData;
+    // Use pooled mnist data if you want to have fewer trainable features.
+    // std::vector<DataPoint> pooledMnistData;
     // for(DataPoint dp : mnistData) {
-    //     DataPoint convDp;
-    //     convDp.features = pool(dp.features, 4);
-    //     convDp.label = dp.label;
-    //     convolutedMnistData.push_back(std::move(convDp));
+    //     DataPoint pooledDp;
+    //     pooledDp.features = pool(dp.features, 4);
+    //     pooledDp.label = dp.label;
+    //     pooledMnistData.push_back(std::move(pooledDp));
     // } 
     DataSet mnistDataSet(mnistData);
     // Matrix mnistMat = getMatrix(mnistDataSet.points);
@@ -777,7 +778,7 @@ void testMnistData() {
     network.layers.push_back(std::move(layer2));
     network.layers.push_back(std::move(layer3));
     Trainer trainer(network, mnistDataSet);
-    trainer.train(1, 3);
+    trainer.train(1, 3, "mnistNetwork.dat");
 }
 
 void testReadingNetworkFromFile(std::string filename) {

@@ -1,3 +1,5 @@
 An implemention for simple dense neural networks and the required matrix calculations in C++ as a first project to get more experience in the language.
 
 Inspired by Sentdex's neural network from scratch videos for python.
+
+mnist_wasm/ includes a toy example app that runs inference on a network trained only on 10k MNIST samples taking a user's drawing on an html canvas as input.
